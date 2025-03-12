@@ -40,8 +40,7 @@ const COLORS = {
   warning: '#FFCC00',
   gradientStart: '#FFB340',
   gradientEnd: '#FF9500',
-  modalBackground: '#FFFFFF',
-  pinColor: '#FF9500',
+  modalBackground: '#FFFFFF'
 };
 
 const AudioVisualizer = () => {
@@ -147,7 +146,7 @@ const App = () => {
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
-  const scaleAnims = useRef<{ [key: string]: Animated.Value }>({}).current;
+  const [animationValues, setAnimationValues] = useState<{ [key: string]: Animated.Value }>({});
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
   const [currentPlayingUri, setCurrentPlayingUri] = useState<string | null>(null);
@@ -194,25 +193,33 @@ const App = () => {
   };
 
   useEffect(() => {
+    const newAnimations = { ...animationValues };
     tasks.forEach(task => {
-      if (!scaleAnims[task.id]) {
-        scaleAnims[task.id] = new Animated.Value(1);
+      if (!newAnimations[task.id]) {
+        newAnimations[task.id] = new Animated.Value(1);
       }
     });
+    setAnimationValues(newAnimations);
   }, [tasks]);
 
   const onPressIn = (taskId: string) => {
-    Animated.spring(scaleAnims[taskId], {
-      toValue: 0.95,
-      useNativeDriver: true,
-    }).start();
+    const anim = animationValues[taskId];
+    if (anim) {
+      Animated.spring(anim, {
+        toValue: 0.95,
+        useNativeDriver: true,
+      }).start();
+    }
   };
   
   const onPressOut = (taskId: string) => {
-    Animated.spring(scaleAnims[taskId], {
-      toValue: 1,
-      useNativeDriver: true,
-    }).start();
+    const anim = animationValues[taskId];
+    if (anim) {
+      Animated.spring(anim, {
+        toValue: 1,
+        useNativeDriver: true,
+      }).start();
+    }
   };
 
   useEffect(() => {
@@ -417,89 +424,80 @@ const App = () => {
     }
   };
 
-  const renderItem = (task: Task) => {
-    const scaleAnim = scaleAnims[task.id] || new Animated.Value(1);
-    
-    return (
-      <Animated.View 
-        key={task.id} 
-        style={[
-          styles.taskItem, 
-          { 
-            opacity: fadeAnim,
-            transform: [{ scale: scaleAnim }]
-          }
-        ]}
+  const renderTask = (task: Task) => (
+    <Animated.View
+      style={[
+        styles.taskContainer,
+        {
+          transform: [{ scale: animationValues[task.id] || new Animated.Value(1) }],
+          backgroundColor: COLORS.card,
+        },
+      ]}
+    >
+      <TouchableOpacity
+        onPressIn={() => onPressIn(task.id)}
+        onPressOut={() => onPressOut(task.id)}
+        onLongPress={() => setEditingTask(task)}
+        style={styles.taskContent}
       >
-        <BlurView intensity={80} tint="light" style={styles.taskBlurContainer}>
-          <Pressable 
-            style={styles.taskContent}
-            onPress={() => openEditModal(task)}
-            onPressIn={() => onPressIn(task.id)}
-            onPressOut={() => onPressOut(task.id)}
-          >
-            <View style={styles.taskHeader}>
-              <Text style={styles.taskTitle} numberOfLines={1}>
-                {task.title}
-              </Text>
-              <View style={styles.taskActions}>
-                {task.audioUris.length > 0 && (
-                  <View style={styles.audioIndicator}>
-                    <MaterialIcons name="mic" size={16} color={COLORS.gradientEnd} />
-                    <Text style={styles.audioText}>{task.audioUris.length}</Text>
-                  </View>
-                )}
-                {task.imageUris.length > 0 && (
-                  <View style={styles.imageIndicator}>
-                    <MaterialIcons name="image" size={16} color={COLORS.gradientEnd} />
-                    <Text style={styles.imageText}>{task.imageUris.length}</Text>
-                  </View>
-                )}
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => deleteTask(task.id)}
-                >
-                  <LinearGradient
-                    colors={['#FF6B6B', '#FF3B30']}
-                    style={styles.deleteButtonGradient}
-                  >
-                    <MaterialIcons name="delete-outline" size={20} color="white" />
-                  </LinearGradient>
-                </TouchableOpacity>
+        <View style={styles.taskHeader}>
+          <Text style={styles.taskTitle}>{task.title}</Text>
+          <View style={styles.taskActions}>
+            {task.audioUris.length > 0 && (
+              <View style={styles.audioIndicator}>
+                <MaterialIcons name="mic" size={16} color={COLORS.gradientEnd} />
+                <Text style={styles.audioText}>{task.audioUris.length}</Text>
               </View>
-            </View>
-            
-            {task.content && (
-              <Text style={styles.taskPreview} numberOfLines={1}>
-                {task.content}
-              </Text>
             )}
-
             {task.imageUris.length > 0 && (
-              <ScrollView 
-                horizontal 
-                style={styles.imageScrollView}
-                showsHorizontalScrollIndicator={false}
-              >
-                {task.imageUris.map((uri, index) => (
-                  <TouchableOpacity
-                    key={index}
-                    onPress={() => setSelectedImage(uri)}
-                  >
-                    <Image 
-                      source={{ uri }} 
-                      style={styles.taskImage}
-                      resizeMode="cover"
-                    />
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              <View style={styles.imageIndicator}>
+                <MaterialIcons name="image" size={16} color={COLORS.gradientEnd} />
+                <Text style={styles.imageText}>{task.imageUris.length}</Text>
+              </View>
             )}
-          </Pressable>
-        </BlurView>
-      </Animated.View>
-    );
-  };
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => deleteTask(task.id)}
+            >
+              <LinearGradient
+                colors={['#FF6B6B', '#FF3B30']}
+                style={styles.deleteButtonGradient}
+              >
+                <MaterialIcons name="delete-outline" size={20} color="white" />
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
+        </View>
+        
+        {task.content && (
+          <Text style={styles.taskPreview} numberOfLines={1}>
+            {task.content}
+          </Text>
+        )}
+
+        {task.imageUris.length > 0 && (
+          <ScrollView 
+            horizontal 
+            style={styles.imageScrollView}
+            showsHorizontalScrollIndicator={false}
+          >
+            {task.imageUris.map((uri, index) => (
+              <TouchableOpacity
+                key={index}
+                onPress={() => setSelectedImage(uri)}
+              >
+                <Image 
+                  source={{ uri }} 
+                  style={styles.taskImage}
+                  resizeMode="cover"
+                />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </TouchableOpacity>
+    </Animated.View>
+  );
 
   const onDragEnd = (newSortedData: Task[]) => {
     setTasks(newSortedData);
@@ -775,7 +773,7 @@ const App = () => {
               <Text style={styles.sectionTitle}>{title}</Text>
               {groupTasks.map(task => (
                 <View key={task.id}>
-                  {renderNoteItem(task)}
+                  {renderTask(task)}
                 </View>
               ))}
             </View>
@@ -1062,11 +1060,10 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 6,
   },
-  taskItem: {
+  taskContainer: {
     marginHorizontal: 16,
     marginVertical: 4,
     borderRadius: 12,
-    backgroundColor: COLORS.card,
     overflow: 'hidden',
   },
   taskContent: {
@@ -1076,7 +1073,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   taskTitle: {
     fontSize: 17,
@@ -1298,7 +1295,6 @@ const styles = StyleSheet.create({
   taskActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
   },
   audioVisualizerContainer: {
     flexDirection: 'row',
@@ -1532,6 +1528,13 @@ const styles = StyleSheet.create({
   },
   modalHeaderAction: {
     padding: 8,
+  },
+  actionButton: {
+    padding: 8,
+    marginLeft: 8,
+  },
+  pinnedButton: {
+    transform: [{ rotate: '45deg' }],
   },
 });
 
