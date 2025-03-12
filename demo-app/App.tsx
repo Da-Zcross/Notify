@@ -16,6 +16,7 @@ interface Task {
   completed: boolean;
   audioUris: string[];
   imageUris: string[];
+  isPinned: boolean;
   links: {
     url: string;
     type: 'website' | 'location';
@@ -40,7 +41,8 @@ const COLORS = {
   warning: '#FFCC00',
   gradientStart: '#FFB340',
   gradientEnd: '#FF9500',
-  modalBackground: '#FFFFFF'
+  modalBackground: '#FFFFFF',
+  pinColor: '#FF9500',
 };
 
 const AudioVisualizer = () => {
@@ -93,6 +95,7 @@ const AudioVisualizer = () => {
 
 const groupTasksByDate = (tasks: Task[]) => {
   const groups: { [key: string]: Task[] } = {
+    "Épinglées": [],
     "Aujourd'hui": [],
     "7 jours précédents": [],
     "30 jours précédents": [],
@@ -104,6 +107,11 @@ const groupTasksByDate = (tasks: Task[]) => {
   const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
   tasks.forEach(task => {
+    if (task.isPinned) {
+      groups["Épinglées"].push(task);
+      return;
+    }
+    
     const taskDate = new Date(task.createdAt);
     if (taskDate.toDateString() === now.toDateString()) {
       groups["Aujourd'hui"].push(task);
@@ -146,10 +154,10 @@ const App = () => {
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const [recordingDuration, setRecordingDuration] = useState(0);
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
-  const [animationValues, setAnimationValues] = useState<{ [key: string]: Animated.Value }>({});
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
   const [currentPlayingUri, setCurrentPlayingUri] = useState<string | null>(null);
+  const [pressedId, setPressedId] = useState<string | null>(null);
 
   useEffect(() => {
     loadTasks();
@@ -192,34 +200,12 @@ const App = () => {
     }
   };
 
-  useEffect(() => {
-    const newAnimations = { ...animationValues };
-    tasks.forEach(task => {
-      if (!newAnimations[task.id]) {
-        newAnimations[task.id] = new Animated.Value(1);
-      }
-    });
-    setAnimationValues(newAnimations);
-  }, [tasks]);
-
   const onPressIn = (taskId: string) => {
-    const anim = animationValues[taskId];
-    if (anim) {
-      Animated.spring(anim, {
-        toValue: 0.95,
-        useNativeDriver: true,
-      }).start();
-    }
+    setPressedId(taskId);
   };
   
   const onPressOut = (taskId: string) => {
-    const anim = animationValues[taskId];
-    if (anim) {
-      Animated.spring(anim, {
-        toValue: 1,
-        useNativeDriver: true,
-      }).start();
-    }
+    setPressedId(null);
   };
 
   useEffect(() => {
@@ -375,6 +361,7 @@ const App = () => {
         createdAt: new Date(),
         audioUris: [],
         imageUris: [],
+        isPinned: false,
         links: []
       }]);
       setNewTask('');
@@ -417,7 +404,13 @@ const App = () => {
     if (editingTask) {
       const newAudioUris = [...editingTask.audioUris];
       if (currentPlayingUri === newAudioUris[index]) {
-        stopAudio();
+        if (sound) {
+          sound.stopAsync();
+          sound.unloadAsync();
+          setSound(null);
+          setIsPlaying(false);
+          setCurrentPlayingUri(null);
+        }
       }
       newAudioUris.splice(index, 1);
       setEditingTask({ ...editingTask, audioUris: newAudioUris });
@@ -429,73 +422,99 @@ const App = () => {
       style={[
         styles.taskContainer,
         {
-          transform: [{ scale: animationValues[task.id] || new Animated.Value(1) }],
-          backgroundColor: COLORS.card,
+          transform: [{ scale: pressedId === task.id ? 0.98 : 1 }],
         },
       ]}
     >
-      <TouchableOpacity
-        onPressIn={() => onPressIn(task.id)}
-        onPressOut={() => onPressOut(task.id)}
-        onLongPress={() => setEditingTask(task)}
-        style={styles.taskContent}
+      <LinearGradient
+        colors={[COLORS.card, task.isPinned ? 'rgba(255,179,64,0.1)' : '#F8F9FA']}
+        style={styles.taskGradient}
       >
-        <View style={styles.taskHeader}>
-          <Text style={styles.taskTitle}>{task.title}</Text>
-          <View style={styles.taskActions}>
-            {task.audioUris.length > 0 && (
-              <View style={styles.audioIndicator}>
-                <MaterialIcons name="mic" size={16} color={COLORS.gradientEnd} />
-                <Text style={styles.audioText}>{task.audioUris.length}</Text>
-              </View>
-            )}
+        <TouchableOpacity
+          onPressIn={() => onPressIn(task.id)}
+          onPressOut={() => onPressOut(task.id)}
+          onPress={() => {
+            setEditingTask(task);
+            setIsModalVisible(true);
+          }}
+          style={styles.taskContent}
+        >
+          <View style={styles.taskHeader}>
+            <View style={styles.taskMetaInfo}>
+              <Text style={styles.taskDate}>{formatDate(task.createdAt)}</Text>
+              <TouchableOpacity 
+                style={[styles.pinButton, task.isPinned && styles.pinnedButton]}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  setTasks(prevTasks => 
+                    prevTasks.map(t => 
+                      t.id === task.id 
+                        ? { ...t, isPinned: !t.isPinned }
+                        : t
+                    )
+                  );
+                }}
+              >
+                <MaterialIcons 
+                  name="push-pin" 
+                  size={20} 
+                  color={task.isPinned ? COLORS.primary : 'rgba(142, 142, 147, 0.5)'}
+                  style={task.isPinned ? { transform: [{ rotate: '45deg' }] } : undefined}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.taskMainContent}>
+            <View style={styles.taskTextContent}>
+              <Text style={styles.taskTitle}>{task.title || "Note sans titre"}</Text>
+              {task.content && (
+                <Text style={styles.taskPreview} numberOfLines={2}>
+                  {task.content}
+                </Text>
+              )}
+            </View>
+
             {task.imageUris.length > 0 && (
-              <View style={styles.imageIndicator}>
-                <MaterialIcons name="image" size={16} color={COLORS.gradientEnd} />
-                <Text style={styles.imageText}>{task.imageUris.length}</Text>
+              <View style={styles.taskMediaPreview}>
+                <Image 
+                  source={{ uri: task.imageUris[0] }} 
+                  style={styles.previewImage}
+                />
+                {task.imageUris.length > 1 && (
+                  <View style={styles.imageCounter}>
+                    <Text style={styles.imageCounterText}>+{task.imageUris.length - 1}</Text>
+                  </View>
+                )}
               </View>
             )}
+          </View>
+
+          <View style={styles.taskFooter}>
+            <View style={styles.taskIndicators}>
+              {task.audioUris.length > 0 && (
+                <View style={styles.indicator}>
+                  <MaterialIcons name="mic" size={14} color={COLORS.primary} />
+                  <Text style={styles.indicatorText}>{task.audioUris.length}</Text>
+                </View>
+              )}
+              {task.imageUris.length > 0 && (
+                <View style={styles.indicator}>
+                  <MaterialIcons name="image" size={14} color={COLORS.primary} />
+                  <Text style={styles.indicatorText}>{task.imageUris.length}</Text>
+                </View>
+              )}
+            </View>
+            
             <TouchableOpacity
               style={styles.deleteButton}
               onPress={() => deleteTask(task.id)}
             >
-              <LinearGradient
-                colors={['#FF6B6B', '#FF3B30']}
-                style={styles.deleteButtonGradient}
-              >
-                <MaterialIcons name="delete-outline" size={20} color="white" />
-              </LinearGradient>
+              <MaterialIcons name="delete-outline" size={18} color={COLORS.error} />
             </TouchableOpacity>
           </View>
-        </View>
-        
-        {task.content && (
-          <Text style={styles.taskPreview} numberOfLines={1}>
-            {task.content}
-          </Text>
-        )}
-
-        {task.imageUris.length > 0 && (
-          <ScrollView 
-            horizontal 
-            style={styles.imageScrollView}
-            showsHorizontalScrollIndicator={false}
-          >
-            {task.imageUris.map((uri, index) => (
-              <TouchableOpacity
-                key={index}
-                onPress={() => setSelectedImage(uri)}
-              >
-                <Image 
-                  source={{ uri }} 
-                  style={styles.taskImage}
-                  resizeMode="cover"
-                />
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        )}
-      </TouchableOpacity>
+        </TouchableOpacity>
+      </LinearGradient>
     </Animated.View>
   );
 
@@ -569,6 +588,7 @@ const App = () => {
       createdAt: new Date(),
       audioUris: [],
       imageUris: [],
+      isPinned: false,
       links: []
     };
     setTasks(prevTasks => [...prevTasks, newNote]);
@@ -579,64 +599,47 @@ const App = () => {
   const shareNote = async (task: Task) => {
     try {
       // Préparer le contenu textuel
-      let content = `${task.title}\n\n`;
-      if (task.content) {
-        content += `${task.content}\n\n`;
-      }
+      let content = '';
+      
+      // Titre et contenu
+      content += task.title ? `${task.title}\n\n` : 'Note sans titre\n\n';
+      content += task.content ? `${task.content}\n\n` : '';
 
-      // Ajouter les liens
+      // Liens
       if (task.links && task.links.length > 0) {
-        content += "Liens :\n";
+        content += 'Liens :\n';
         task.links.forEach(link => {
-          content += `- ${link.title || link.url}\n${link.url}\n`;
+          content += `${link.title ? link.title + ' : ' : ''}${link.url}\n`;
         });
-        content += "\n";
+        content += '\n';
       }
 
-      // Préparer les fichiers à partager
-      const files: string[] = [];
+      // Préparer tous les fichiers à partager
+      const files = [...task.imageUris, ...task.audioUris];
 
-      // Ajouter les images
-      if (task.imageUris && task.imageUris.length > 0) {
-        files.push(...task.imageUris);
-      }
-
-      // Ajouter les notes vocales
-      if (task.audioUris && task.audioUris.length > 0) {
-        files.push(...task.audioUris);
-      }
-
-      if (Platform.OS === 'ios') {
-        // Sur iOS, on partage le contenu avec chaque fichier
-        if (files.length > 0) {
-          for (const file of files) {
-            try {
-              await Share.share({
-                message: content,
-                url: file
-              });
-            } catch (error) {
-              console.error('Erreur lors du partage du fichier:', error);
-            }
-          }
-        } else {
-          // Partager juste le contenu s'il n'y a pas de fichiers
+      // Partager tout en une seule fois
+      if (files.length > 0) {
+        // Sur iOS, on peut partager plusieurs fichiers
+        if (Platform.OS === 'ios') {
           await Share.share({
-            message: content
+            message: content,
+            url: files.join(','),
+            title: task.title || 'Note partagée'
+          });
+        } else {
+          // Sur Android, on partage le contenu et les URLs des fichiers
+          const filesList = files.map(file => `\n- ${file}`).join('');
+          await Share.share({
+            message: `${content}\nFichiers joints :${filesList}`,
+            title: task.title || 'Note partagée'
           });
         }
       } else {
-        // Sur Android, on utilise une approche différente pour partager plusieurs fichiers
-        if (files.length > 0) {
-          await Share.share({
-            message: content,
-            url: files.join(',')
-          });
-        } else {
-          await Share.share({
-            message: content
-          });
-        }
+        // Partage sans fichiers
+        await Share.share({
+          message: content,
+          title: task.title || 'Note partagée'
+        });
       }
     } catch (error) {
       console.error('Erreur de partage:', error);
@@ -789,46 +792,6 @@ const App = () => {
       </TouchableOpacity>
 
       <Modal
-        visible={!!selectedImage}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setSelectedImage(null)}
-        statusBarTranslucent={true}
-      >
-        <View style={styles.imageModalContainer}>
-          <TouchableOpacity
-            style={styles.imageModalCloseButton}
-            onPress={() => setSelectedImage(null)}
-          >
-            <MaterialIcons name="close" size={24} color="white" />
-          </TouchableOpacity>
-          {selectedImage && (
-            <View style={styles.imageModalContent}>
-              <Image
-                source={{ uri: selectedImage }}
-                style={styles.imageModalImage}
-                resizeMode="contain"
-              />
-            </View>
-          )}
-          <View style={styles.imageModalControls}>
-            <TouchableOpacity
-              style={styles.imageModalShareButton}
-              onPress={() => {
-                if (selectedImage) {
-                  Share.share({
-                    url: selectedImage,
-                  });
-                }
-              }}
-            >
-              <MaterialIcons name="share" size={24} color="white" />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
         visible={isModalVisible}
         animationType="slide"
         presentationStyle="pageSheet"
@@ -964,6 +927,31 @@ const App = () => {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={!!selectedImage}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setSelectedImage(null)}
+      >
+        <View style={styles.imageModalContainer}>
+          <TouchableOpacity
+            style={styles.imageModalCloseButton}
+            onPress={() => setSelectedImage(null)}
+          >
+            <MaterialIcons name="close" size={24} color="white" />
+          </TouchableOpacity>
+          {selectedImage && (
+            <View style={styles.imageModalContent}>
+              <Image
+                source={{ uri: selectedImage }}
+                style={styles.imageModalImage}
+                resizeMode="contain"
+              />
+            </View>
+          )}
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -1062,54 +1050,124 @@ const styles = StyleSheet.create({
   },
   taskContainer: {
     marginHorizontal: 16,
-    marginVertical: 4,
-    borderRadius: 12,
+    marginVertical: 8,
+    borderRadius: 20,
     overflow: 'hidden',
+    backgroundColor: COLORS.card,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  taskGradient: {
+    borderRadius: 20,
   },
   taskContent: {
     padding: 16,
   },
   taskHeader: {
+    marginBottom: 12,
+  },
+  taskMetaInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
   },
+  taskDate: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
+  pinButton: {
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  pinnedButton: {
+    backgroundColor: 'rgba(255,179,64,0.2)',
+    transform: [{ rotate: '45deg' }],
+  },
+  taskMainContent: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  taskTextContent: {
+    flex: 1,
+  },
   taskTitle: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '600',
     color: COLORS.text,
     marginBottom: 4,
+    letterSpacing: -0.2,
   },
   taskPreview: {
-    fontSize: 15,
+    fontSize: 14,
     color: COLORS.textSecondary,
-    marginBottom: 8,
+    lineHeight: 20,
   },
-  taskImage: {
+  taskMediaPreview: {
+    position: 'relative',
     width: 80,
     height: 80,
-    borderRadius: 8,
-    marginRight: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
+  },
+  imageCounter: {
+    position: 'absolute',
+    right: 4,
+    bottom: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+  },
+  imageCounterText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
   },
   taskFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0,0,0,0.05)',
   },
-  taskDate: {
-    fontSize: 13,
-    color: COLORS.textSecondary,
-    letterSpacing: 0.25,
+  taskIndicators: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  indicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,179,64,0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  indicatorText: {
+    fontSize: 12,
+    color: COLORS.primary,
+    fontWeight: '600',
   },
   deleteButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  deleteButtonGradient: {
     padding: 6,
     borderRadius: 12,
+    backgroundColor: 'rgba(255,59,48,0.1)',
   },
   modalContainer: {
     flex: 1,
@@ -1283,41 +1341,6 @@ const styles = StyleSheet.create({
       },
     }),
   },
-  audioIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,122,255,0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 8,
-  },
-  taskActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  audioVisualizerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    height: 32,
-    width: '100%',
-    paddingHorizontal: 8,
-  },
-  audioBar: {
-    width: 3,
-    borderRadius: 1.5,
-    opacity: 0.9,
-  },
-  audioDeleteButton: {
-    width: 44,
-    height: 44,
-    backgroundColor: 'rgba(255,59,48,0.1)',
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 12,
-  },
   modalAudioDeleteButton: {
     width: 56,
     height: 56,
@@ -1398,8 +1421,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   imageModalContent: {
-    width: Dimensions.get('window').width,
-    height: Dimensions.get('window').height,
+    width: '100%',
+    height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -1533,8 +1556,18 @@ const styles = StyleSheet.create({
     padding: 8,
     marginLeft: 8,
   },
-  pinnedButton: {
-    transform: [{ rotate: '45deg' }],
+  audioVisualizerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 32,
+    width: '100%',
+    paddingHorizontal: 8,
+  },
+  audioBar: {
+    width: 3,
+    borderRadius: 1.5,
+    opacity: 0.9,
   },
 });
 
